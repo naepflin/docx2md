@@ -321,7 +321,7 @@ def convert_md_to_docx(md_text, input_path=None):
                 list_counter[0] += 1
                 style = "List Number" if ordered else "List Bullet"
                 for child in item.get("children", []):
-                    if child["type"] == "paragraph":
+                    if child["type"] in ("paragraph", "block_text"):
                         p = doc.add_paragraph(style=style)
                         _add_inline(p, child.get("children", []))
 
