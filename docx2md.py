@@ -260,6 +260,29 @@ def _add_table(doc, token):
             _add_inline(p, cell_tok.get("children", []))
 
 
+def _add_list(doc, tok):
+    """Recursively render a list token into docx paragraphs."""
+    ordered = tok["attrs"].get("ordered", False)
+    depth = tok["attrs"].get("depth", 0)
+    level = depth + 1
+    suffix = f" {level}" if level > 1 else ""
+    style = f"List Number{suffix}" if ordered else f"List Bullet{suffix}"
+
+    for item in tok.get("children", []):
+        for child in item.get("children", []):
+            ctype = child["type"]
+            if ctype in ("paragraph", "block_text"):
+                p = doc.add_paragraph(style=style)
+                _add_inline(p, child.get("children", []))
+            elif ctype == "list":
+                _add_list(doc, child)
+            elif ctype == "block_code":
+                p = doc.add_paragraph()
+                run = p.add_run(child.get("raw", "").rstrip("\n"))
+                run.font.name = "Courier New"
+                run.font.size = Pt(9)
+
+
 def convert_md_to_docx(md_text, input_path=None):
     """Convert markdown text to a python-docx Document."""
     md = mistune.create_markdown(renderer=None, plugins=["table", "strikethrough"])
@@ -267,7 +290,6 @@ def convert_md_to_docx(md_text, input_path=None):
 
     doc = Document()
     input_dir = os.path.dirname(os.path.abspath(input_path)) if input_path else None
-    list_counter = [0]
 
     for tok in tokens:
         ttype = tok["type"]
@@ -315,15 +337,7 @@ def convert_md_to_docx(md_text, input_path=None):
             run.font.size = Pt(9)
 
         elif ttype == "list":
-            ordered = tok["attrs"].get("ordered", False)
-            list_counter[0] = 0
-            for item in tok.get("children", []):
-                list_counter[0] += 1
-                style = "List Number" if ordered else "List Bullet"
-                for child in item.get("children", []):
-                    if child["type"] in ("paragraph", "block_text"):
-                        p = doc.add_paragraph(style=style)
-                        _add_inline(p, child.get("children", []))
+            _add_list(doc, tok)
 
         elif ttype == "block_quote":
             for child in tok.get("children", []):
