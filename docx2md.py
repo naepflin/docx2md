@@ -194,6 +194,17 @@ HEADING_MAP = {
 }
 
 
+def _extract_text(tokens):
+    """Recursively extract plain text from a list of inline tokens."""
+    parts = []
+    for tok in tokens:
+        if "raw" in tok:
+            parts.append(tok["raw"])
+        elif tok.get("children"):
+            parts.append(_extract_text(tok["children"]))
+    return "".join(parts)
+
+
 def _add_inline(paragraph, tokens):
     """Render inline markdown tokens into a docx paragraph."""
     for tok in tokens:
@@ -205,13 +216,13 @@ def _add_inline(paragraph, tokens):
             run.font.name = "Courier New"
             run.font.size = Pt(9)
         elif ttype == "strong":
-            run = paragraph.add_run(tok["children"][0]["raw"] if tok.get("children") else "")
+            run = paragraph.add_run(_extract_text(tok.get("children", [])))
             run.bold = True
         elif ttype == "emphasis":
-            run = paragraph.add_run(tok["children"][0]["raw"] if tok.get("children") else "")
+            run = paragraph.add_run(_extract_text(tok.get("children", [])))
             run.italic = True
         elif ttype == "link":
-            text = tok["children"][0]["raw"] if tok.get("children") else tok.get("link", "")
+            text = _extract_text(tok["children"]) if tok.get("children") else tok.get("link", "")
             paragraph.add_run(text)
         elif ttype == "image":
             paragraph.add_run(f'[image: {tok.get("alt", "")}]')
