@@ -89,7 +89,7 @@ def html_to_markdown(html):
     md = re.sub(r"<li>(.*?)</li>", replace_ol_item, md, flags=re.DOTALL)
 
     # Paragraphs
-    md = re.sub(r"<p>(.*?)</p>", r"\1\n", md, flags=re.DOTALL)
+    md = re.sub(r"<p>(.*?)</p>", r"\1\n\n", md, flags=re.DOTALL)
 
     # Tables
     md = convert_html_tables(md)
