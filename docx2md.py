@@ -227,9 +227,14 @@ def _add_inline(paragraph, tokens):
         elif ttype == "image":
             paragraph.add_run(f'[image: {tok.get("alt", "")}]')
         elif ttype == "softbreak":
-            paragraph.add_run("\n")
+            # A single newline inside a paragraph is a soft break: per the
+            # Markdown spec it separates source lines only and renders as a
+            # space, not a line break.
+            paragraph.add_run(" ")
         elif ttype == "linebreak":
-            paragraph.add_run("\n")
+            # A hard break (trailing two spaces or a backslash) becomes an
+            # actual line break within the same Word paragraph.
+            paragraph.add_run().add_break()
         else:
             if "children" in tok and tok["children"]:
                 _add_inline(paragraph, tok["children"])
