@@ -5,6 +5,7 @@ import os
 import re
 import base64
 import mimetypes
+import zipfile
 
 import mammoth
 import mistune
@@ -429,22 +430,69 @@ def convert_md_to_docx(md_text, input_path=None):
     return doc
 
 
+def is_docx(path):
+    """Return True if the file is a DOCX, judged by content, not by name."""
+    # A .docx is a zip archive holding word/document.xml.
+    if not zipfile.is_zipfile(path):
+        return False
+    try:
+        with zipfile.ZipFile(path) as zf:
+            return "word/document.xml" in zf.namelist()
+    except zipfile.BadZipFile:
+        return False
+
+
+def detect_direction(path):
+    """Pick the conversion direction. Returns True for markdown → DOCX.
+
+    The content decides, not the extension, so a misnamed or extensionless
+    file still converts the right way: anything that is not a DOCX container
+    is read as markdown text.
+    """
+    if is_docx(path):
+        return False
+    if os.path.splitext(path)[1].lower() == ".docx":
+        raise ValueError(
+            f'"{path}" has a .docx extension but is not a valid DOCX file'
+        )
+    return True
+
+
 def main():
     args = sys.argv[1:]
 
-    reverse = "-r" in args
+    forced_reverse = "-r" in args
     extract_images = "--images" in args
     args = [a for a in args if a not in ("-r", "--images")]
 
     if not args:
         print("Usage: docx2md [-r] [--images] <input> [output]", file=sys.stderr)
-        print("  docx2md input.docx         Convert DOCX → Markdown", file=sys.stderr)
-        print("  docx2md -r input.md         Convert Markdown → DOCX", file=sys.stderr)
+        print("  docx2md input.docx          Convert DOCX → Markdown", file=sys.stderr)
+        print("  docx2md input.md            Convert Markdown → DOCX", file=sys.stderr)
+        print(
+            "  The direction follows the input file; -r is no longer needed.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     input_file = args[0]
     if not os.path.exists(input_file):
         print(f'Error: File "{input_file}" not found', file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        reverse = detect_direction(input_file)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    # -r is kept for compatibility, but it can only agree with the input.
+    if forced_reverse and not reverse:
+        print(
+            f'Error: "{input_file}" is a DOCX file, so -r (Markdown → DOCX) '
+            "does not apply.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     base, _ = os.path.splitext(input_file)
