@@ -42,9 +42,44 @@ def save_image(image, output_dir, image_count):
     return {"src": filename, "alt": alt}
 
 
+def _apply_inline_formatting(md):
+    """Apply the inline-level HTML → markdown substitutions."""
+    md = re.sub(r"<strong>(.*?)</strong>", r"**\1**", md, flags=re.DOTALL)
+    md = re.sub(r"<em>(.*?)</em>", r"*\1*", md, flags=re.DOTALL)
+    md = re.sub(r'<a href="(.*?)">(.*?)</a>', r"[\2](\1)", md, flags=re.DOTALL)
+    md = re.sub(r'<img src="(.*?)" alt="(.*?)" />', r"![\2](\1)", md)
+    md = re.sub(r'<img src="(.*?)" />', r"![image](\1)", md)
+    md = re.sub(r"<code>(.*?)</code>", r"`\1`", md, flags=re.DOTALL)
+    md = re.sub(r"<sup>(.*?)</sup>", r"^\1^", md, flags=re.DOTALL)
+    md = re.sub(r"<sub>(.*?)</sub>", r"~\1~", md, flags=re.DOTALL)
+    return md
+
+
+def _unescape_entities(text):
+    """Turn the HTML entities mammoth emits back into literal characters."""
+    text = text.replace("&lt;", "<")
+    text = text.replace("&gt;", ">")
+    text = text.replace("&quot;", '"')
+    text = text.replace("&#39;", "'")
+    text = text.replace("&nbsp;", " ")
+    # &amp; last, so "&amp;lt;" does not become "<"
+    text = text.replace("&amp;", "&")
+    return text
+
+
 def html_to_markdown(html):
     """Convert mammoth's HTML output to clean markdown."""
-    md = html
+    # Tables are converted first and parked behind placeholders: their cells
+    # hold block markup (paragraphs, lists, breaks) that the block-level rules
+    # below would turn into newlines, and a newline inside a markdown table
+    # cell ends the row.
+    tables = []
+
+    def stash_table(match):
+        tables.append(table_to_markdown(match.group(0)))
+        return f"\n\n\x00TABLE{len(tables) - 1}\x00\n\n"
+
+    md = re.sub(r"<table\b[^>]*>.*?</table>", stash_table, html, flags=re.DOTALL)
 
     # Headings
     for level in range(6, 0, -1):
@@ -55,17 +90,6 @@ def html_to_markdown(html):
             md,
             flags=re.DOTALL,
         )
-
-    # Bold and italic
-    md = re.sub(r"<strong>(.*?)</strong>", r"**\1**", md, flags=re.DOTALL)
-    md = re.sub(r"<em>(.*?)</em>", r"*\1*", md, flags=re.DOTALL)
-
-    # Links
-    md = re.sub(r'<a href="(.*?)">(.*?)</a>', r"[\2](\1)", md, flags=re.DOTALL)
-
-    # Images
-    md = re.sub(r'<img src="(.*?)" alt="(.*?)" />', r"![\2](\1)", md)
-    md = re.sub(r'<img src="(.*?)" />', r"![image](\1)", md)
 
     # Line breaks
     md = re.sub(r"<br />", "\n", md)
@@ -91,9 +115,6 @@ def html_to_markdown(html):
     # Paragraphs
     md = re.sub(r"<p>(.*?)</p>", r"\1\n\n", md, flags=re.DOTALL)
 
-    # Tables
-    md = convert_html_tables(md)
-
     # Blockquotes
     md = re.sub(
         r"<blockquote>(.*?)</blockquote>",
@@ -103,55 +124,82 @@ def html_to_markdown(html):
     )
 
     # Code
-    md = re.sub(r"<code>(.*?)</code>", r"`\1`", md, flags=re.DOTALL)
     md = re.sub(
         r"<pre>(.*?)</pre>", r"```\n\1\n```\n", md, flags=re.DOTALL
     )
 
-    # Superscript / subscript
-    md = re.sub(r"<sup>(.*?)</sup>", r"^\1^", md, flags=re.DOTALL)
-    md = re.sub(r"<sub>(.*?)</sub>", r"~\1~", md, flags=re.DOTALL)
+    # Bold, italic, links, images, inline code, super/subscript
+    md = _apply_inline_formatting(md)
 
     # Strip any remaining HTML tags
     md = re.sub(r"<[^>]+>", "", md)
 
-    # Unescape HTML entities
-    md = md.replace("&amp;", "&")
-    md = md.replace("&lt;", "<")
-    md = md.replace("&gt;", ">")
-    md = md.replace("&quot;", '"')
-    md = md.replace("&#39;", "'")
-    md = md.replace("&nbsp;", " ")
+    md = _unescape_entities(md)
 
     # Clean up whitespace: collapse 3+ newlines to 2
     md = re.sub(r"\n{3,}", "\n\n", md)
     md = md.strip() + "\n"
 
+    # Put the tables back now that no block-level rule can reach into them
+    md = re.sub(r"\x00TABLE(\d+)\x00", lambda m: tables[int(m.group(1))], md)
+
     return md
 
 
-def convert_html_tables(html):
-    """Convert HTML tables to markdown tables."""
-    def table_to_md(match):
-        table_html = match.group(0)
-        rows = re.findall(r"<tr>(.*?)</tr>", table_html, re.DOTALL)
-        if not rows:
-            return table_html
+def cell_to_markdown(cell_html):
+    """Convert the inner HTML of one table cell to single-line markdown."""
+    # Every block boundary inside the cell becomes a hard break, because a
+    # markdown cell cannot span lines.
+    sep = "\x00BR\x00"
+    md = re.sub(r"<li[^>]*>(.*?)</li>", rf"{sep}• \1", cell_html, flags=re.DOTALL)
+    md = re.sub(r"<br\s*/?>", sep, md)
+    md = re.sub(r"</?(?:p|div|ul|ol|h[1-6]|blockquote)\b[^>]*>", sep, md)
 
-        md_rows = []
-        for row in rows:
-            cells = re.findall(r"<t[hd]>(.*?)</t[hd]>", row, re.DOTALL)
-            cells = [c.strip() for c in cells]
-            md_rows.append("| " + " | ".join(cells) + " |")
+    md = _apply_inline_formatting(md)
+    md = re.sub(r"<[^>]+>", "", md)
+    md = _unescape_entities(md)
 
-        if len(md_rows) >= 1:
-            num_cols = md_rows[0].count("|") - 1
-            separator = "| " + " | ".join(["---"] * num_cols) + " |"
-            md_rows.insert(1, separator)
+    # Drop the empty blocks that Word's spacer paragraphs leave behind
+    blocks = [re.sub(r"\s+", " ", b).strip() for b in md.split(sep)]
+    text = "<br>".join(b for b in blocks if b)
 
-        return "\n" + "\n".join(md_rows) + "\n"
+    # A literal pipe would end the cell
+    return text.replace("|", "\\|")
 
-    return re.sub(r"<table>.*?</table>", table_to_md, html, flags=re.DOTALL)
+
+def table_to_markdown(table_html):
+    """Convert one HTML table to a markdown table."""
+    rows = re.findall(r"<tr\b[^>]*>(.*?)</tr>", table_html, re.DOTALL)
+    if not rows:
+        return ""
+
+    # Each row is a list of cells; a colspan cell is followed by the empty
+    # cells it swallowed, since markdown has no way to merge columns.
+    parsed = []
+    for row in rows:
+        cells = []
+        for _tag, attrs, inner in re.findall(
+            r"<t([dh])\b([^>]*)>(.*?)</t\1>", row, re.DOTALL
+        ):
+            cells.append(cell_to_markdown(inner))
+            span = re.search(r'colspan="(\d+)"', attrs)
+            if span:
+                cells.extend([""] * (int(span.group(1)) - 1))
+        parsed.append(cells)
+
+    num_cols = max(len(cells) for cells in parsed)
+    if num_cols == 0:
+        return ""
+
+    md_rows = []
+    for cells in parsed:
+        cells = cells + [""] * (num_cols - len(cells))
+        md_rows.append("| " + " | ".join(cells) + " |")
+
+    separator = "| " + " | ".join(["---"] * num_cols) + " |"
+    md_rows.insert(1, separator)
+
+    return "\n".join(md_rows)
 
 
 def convert(input_path, extract_images=False, image_dir=None):
@@ -235,6 +283,14 @@ def _add_inline(paragraph, tokens):
             # A hard break (trailing two spaces or a backslash) becomes an
             # actual line break within the same Word paragraph.
             paragraph.add_run().add_break()
+        elif ttype == "inline_html":
+            # Table cells carry <br> for the block breaks a markdown cell
+            # cannot express; any other stray tag is markup, not content.
+            raw = tok.get("raw", "")
+            if re.match(r"<br\s*/?>", raw, re.IGNORECASE):
+                paragraph.add_run().add_break()
+            elif not raw.startswith("<"):
+                paragraph.add_run(raw)
         else:
             if "children" in tok and tok["children"]:
                 _add_inline(paragraph, tok["children"])
