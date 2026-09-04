@@ -32,6 +32,19 @@ being treated as Markdown.
 
 `-r` is still accepted for compatibility, but it is no longer needed.
 
+### Overwriting
+
+When the output path is guessed from the input, an existing file is never
+overwritten — otherwise converting `report.md` would silently destroy the
+`report.docx` it came from. Pass `-f` / `--force` to overwrite it anyway, or
+name the output file yourself, which is taken as saying you meant it:
+
+```bash
+docx2md report.docx              # refuses if report.md exists
+docx2md --force report.docx      # overwrites report.md
+docx2md report.docx report.md    # explicit, overwrites
+```
+
 ## Supported formatting
 
 - Headings (h1–h6)

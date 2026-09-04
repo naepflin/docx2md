@@ -463,14 +463,22 @@ def main():
 
     forced_reverse = "-r" in args
     extract_images = "--images" in args
-    args = [a for a in args if a not in ("-r", "--images")]
+    force = "-f" in args or "--force" in args
+    args = [a for a in args if a not in ("-r", "--images", "-f", "--force")]
 
     if not args:
-        print("Usage: docx2md [-r] [--images] <input> [output]", file=sys.stderr)
+        print(
+            "Usage: docx2md [-r] [--images] [-f|--force] <input> [output]",
+            file=sys.stderr,
+        )
         print("  docx2md input.docx          Convert DOCX → Markdown", file=sys.stderr)
         print("  docx2md input.md            Convert Markdown → DOCX", file=sys.stderr)
         print(
             "  The direction follows the input file; -r is no longer needed.",
+            file=sys.stderr,
+        )
+        print(
+            "  -f, --force                 Overwrite an existing default output",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -497,12 +505,24 @@ def main():
 
     base, _ = os.path.splitext(input_file)
     default_out_ext = ".docx" if reverse else ".md"
-    output_file = args[1] if len(args) > 1 else base + default_out_ext
+    explicit_output = len(args) > 1
+    output_file = args[1] if explicit_output else base + default_out_ext
 
     if os.path.abspath(input_file) == os.path.abspath(output_file):
         print(
             f'Error: Output file would overwrite input file "{input_file}". '
             "Please specify a different output file.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # A guessed output path must not clobber an existing file: converting
+    # report.md would otherwise silently overwrite the report.docx it came
+    # from. Naming the output is taken as saying you meant it.
+    if not explicit_output and not force and os.path.exists(output_file):
+        print(
+            f'Error: "{output_file}" already exists. Pass a different output '
+            "file, or --force to overwrite it.",
             file=sys.stderr,
         )
         sys.exit(1)
